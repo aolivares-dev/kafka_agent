@@ -3,6 +3,7 @@ from flask import Flask, logging
 from flask import request
 import kafka_producer
 import kafka_consumer
+import kafka_admin
 app = Flask(__name__)
 logger = logging.create_logger(app)
 
@@ -83,4 +84,52 @@ def consumer_v2():
     return {
         "data": None
     }
+
+@app.route("/clean-topics", methods=['POST'])
+def clean_topics():
+    """
+    Endpoint para limpiar tópicos de Kafka.
+    Si la lista de tópicos está vacía, elimina todos los tópicos.
+    
+    Body esperado:
+    {
+        "body": {
+            "topics": ["topico-1", "topico-2", ...]
+        }
+    }
+    """
+    logger.info("Iniciando limpieza de tópicos")
+    
+    request_data = request.get_json() if request.is_json else {}
+    body = request_data.get("body", {})
+    topics = body.get("topics", [])
+    
+    # Validar que topics sea una lista
+    if not isinstance(topics, list):
+        return {
+            "status": {
+                "code": 400,
+                "message": "El campo 'topics' debe ser una lista de strings"
+            },
+            "data": None
+        }, 400
+    
+    # Validar que todos los elementos de la lista sean strings
+    if topics and not all(isinstance(topic, str) for topic in topics):
+        return {
+            "status": {
+                "code": 400,
+                "message": "Todos los elementos de 'topics' deben ser strings"
+            },
+            "data": None
+        }, 400
+    
+    # Si la lista está vacía, se limpiarán todos los tópicos
+    if not topics:
+        logger.info("Lista de tópicos vacía. Se limpiarán todos los tópicos")
+    
+    result = kafka_admin.delete_topics(topics if topics else None)
+    
+    status_code = result["status"]["code"]
+    return result, status_code
 
