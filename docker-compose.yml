@@ -1,0 +1,9 @@
+services:
+    kafka_agent:
+        image: kafka_agent_i:latest
+        restart: unless-stopped
+        ports:
+         - "9091:80"
+        environment:
+          - AWS_REGION=us-west-2
+          - CONSUMER_RETRY_ATTEMPS=3
