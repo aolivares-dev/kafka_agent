@@ -8,16 +8,16 @@ from typing import Dict, Any, Optional, List
 
 def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Dict[str, Any]:
     """
-    Obtiene un mensaje específico de Kafka por su cloud_event_id.
+    Obtiene un mensaje especifico de Kafka por su cloud_event_id.
 
     :param cloud_event_id: id del evento a buscar
     :param topic: topico de Kafka
     :param group: grupo consumidor
-    :param max_polls: número máximo de intentos de poll
+    :param max_polls: numero maximo de intentos de poll
     :return: Un diccionario con la estructura {data: {key, value, headers}} si se encuentra el mensaje,
              o None si no se encuentra o hay un error
     """
-    # Configuración de logging
+    # Configuracion de logging
     logging_format = '%(asctime)s - %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=logging_format)
     logger = logging.getLogger(__name__)
@@ -29,12 +29,14 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Di
 
         bootstrap_servers = aws_utils.get_param("/config/all/common/kafka/boostrap-servers-tls").split(",")
         
-        # Configuración según el entorno
+        # Configuracion segun el entorno
         is_local = os.getenv("ENV") == "local" or os.getenv("USE_LOCAL_KAFKA") == "true"
         
         kafka_config = {
             "bootstrap_servers": bootstrap_servers,
             "auto_offset_reset": 'earliest',
+            "enable_auto_commit": True,
+            "auto_commit_interval_ms": 5000,
             "request_timeout_ms": 30000,
             "group_id": group,
             "fetch_max_wait_ms": 500,
@@ -43,7 +45,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Di
         }
         
         if not is_local:
-            # Agregar configuración SSL solo para producción
+            # Agregar configuracion SSL solo para produccion
             kafka_config["ssl_check_hostname"] = False
             kafka_config["security_protocol"] = "SSL"
         
@@ -103,7 +105,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Di
                             return None
 
         logger.warning(
-            f"No se encontró el mensaje con cloud_event_id: {cloud_event_id} después de {max_polls} intentos")
+            f"No se encontro el mensaje con cloud_event_id: {cloud_event_id} despues de {max_polls} intentos")
         return None
 
     except Exception as e:
@@ -112,7 +114,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Di
     finally:
         if consumer:
             try:
-                consumer.close(autocommit=False)
+                consumer.close(autocommit=True)
                 logger.info("Consumer cerrado correctamente")
             except Exception as e:
                 logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)
@@ -120,17 +122,17 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Di
 
 def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=10) -> List[Dict[str, Any]]:
     """
-    Obtiene un mensaje específico de Kafka por una cabecera.
+    Obtiene un mensaje especifico de Kafka por una cabecera.
 
-    :param header_name: nombre de la cabecera a buscar
+    :param header_key: nombre de la cabecera a buscar
     :param header_value: valor de la cabecera a buscar
     :param topic: topico de Kafka
     :param group: grupo consumidor
-    :param max_polls: número máximo de intentos de poll
+    :param max_polls: numero maximo de intentos de poll
     :return: Un diccionario con la estructura {data: {key, value, headers}} si se encuentra el mensaje,
              o None si no se encuentra o hay un error
     """
-    # Configuración de logging
+    # Configuracion de logging
     logging_format = '%(asctime)s - %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=logging_format)
     logger = logging.getLogger(__name__)
@@ -142,12 +144,14 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
 
         bootstrap_servers = aws_utils.get_param("/config/all/common/kafka/boostrap-servers-tls").split(",")
         
-        # Configuración según el entorno
+        # Configuracion segun el entorno
         is_local = os.getenv("ENV") == "local" or os.getenv("USE_LOCAL_KAFKA") == "true"
         
         kafka_config = {
             "bootstrap_servers": bootstrap_servers,
             "auto_offset_reset": 'earliest',
+            "enable_auto_commit": True,
+            "auto_commit_interval_ms": 5000,
             "request_timeout_ms": 30000,
             "group_id": group,
             "fetch_max_wait_ms": 500,
@@ -156,7 +160,7 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
         }
         
         if not is_local:
-            # Agregar configuración SSL solo para producción
+            # Agregar configuracion SSL solo para produccion
             kafka_config["ssl_check_hostname"] = False
             kafka_config["security_protocol"] = "SSL"
         
@@ -218,7 +222,11 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
                             return None
             if len(response) > 0:
                 return response
-        logger.warning(f"No se encontró el mensaje con {header_key}: {header_value} después de {max_polls} intentos")
+
+            # Commit offsets after each poll to avoid re-reading on retry
+            consumer.commit()
+
+        logger.warning(f"No se encontro el mensaje con {header_key}: {header_value} despues de {max_polls} intentos")
         return response
 
     except Exception as e:
@@ -227,7 +235,7 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
     finally:
         if consumer:
             try:
-                consumer.close(autocommit=False)
+                consumer.close(autocommit=True)
                 logger.info("Consumer cerrado correctamente")
             except Exception as e:
                 logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)

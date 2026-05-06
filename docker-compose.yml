@@ -8,4 +8,4 @@ services:
         environment:
           - AWS_REGION=${AWS_REGION:-us-west-2}
           - ENV=${ENV:-dev}
-          - CONSUMER_RETRY_ATTEMPS=3
+          - CONSUMER_RETRY_ATTEMPS=6
