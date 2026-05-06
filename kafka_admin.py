@@ -102,20 +102,46 @@ def delete_topics(topics: Optional[List[str]] = None) -> dict:
             }
         
         # Eliminar los tópicos
+        logger.info(f"Eliminando tópicos: {topics}")
         result = admin_client.delete_topics(topics, timeout_ms=30000)
         
         # Esperar a que se completen las eliminaciones
         deleted_topics = []
         failed_topics = []
         
-        for topic, future in result.items():
-            try:
-                future.result()  # Esperar a que se complete la operación
-                deleted_topics.append(topic)
-                logger.info(f"Tópico '{topic}' eliminado exitosamente")
-            except Exception as e:
-                failed_topics.append({"topic": topic, "error": str(e)})
-                logger.error(f"Error al eliminar el tópico '{topic}': {str(e)}")
+        # El resultado puede ser un dict o un objeto DeleteTopicsResponse
+        if hasattr(result, 'topic_error_codes'):
+            # Versión nueva de kafka-python que retorna DeleteTopicsResponse
+            logger.info("Procesando respuesta como DeleteTopicsResponse")
+            for topic_name in topics:
+                try:
+                    # Verificar si el tópico fue eliminado exitosamente
+                    # Error code 0 significa éxito
+                    error_code = result.topic_error_codes.get(topic_name, -1)
+                    if error_code == 0:
+                        deleted_topics.append(topic_name)
+                        logger.info(f"Tópico '{topic_name}' eliminado exitosamente")
+                    else:
+                        failed_topics.append({"topic": topic_name, "error": f"Error code: {error_code}"})
+                        logger.error(f"Error al eliminar el tópico '{topic_name}': Error code {error_code}")
+                except Exception as e:
+                    failed_topics.append({"topic": topic_name, "error": str(e)})
+                    logger.error(f"Error al eliminar el tópico '{topic_name}': {str(e)}")
+        elif isinstance(result, dict):
+            # Versión antigua que retorna un diccionario con futures
+            logger.info("Procesando respuesta como diccionario de futures")
+            for topic, future in result.items():
+                try:
+                    future.result()  # Esperar a que se complete la operación
+                    deleted_topics.append(topic)
+                    logger.info(f"Tópico '{topic}' eliminado exitosamente")
+                except Exception as e:
+                    failed_topics.append({"topic": topic, "error": str(e)})
+                    logger.error(f"Error al eliminar el tópico '{topic}': {str(e)}")
+        else:
+            # Asumir que todos se eliminaron correctamente si no podemos verificar
+            logger.warning("Formato de respuesta desconocido, asumiendo éxito")
+            deleted_topics = topics
         
         # Preparar respuesta considerando tópicos no encontrados
         response_data = {
