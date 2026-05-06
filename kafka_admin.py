@@ -113,20 +113,49 @@ def delete_topics(topics: Optional[List[str]] = None) -> dict:
         if hasattr(result, 'topic_error_codes'):
             # Versión nueva de kafka-python que retorna DeleteTopicsResponse
             logger.info("Procesando respuesta como DeleteTopicsResponse")
-            for topic_name in topics:
-                try:
-                    # Verificar si el tópico fue eliminado exitosamente
-                    # Error code 0 significa éxito
-                    error_code = result.topic_error_codes.get(topic_name, -1)
-                    if error_code == 0:
-                        deleted_topics.append(topic_name)
-                        logger.info(f"Tópico '{topic_name}' eliminado exitosamente")
+            logger.info(f"Tipo de topic_error_codes: {type(result.topic_error_codes)}")
+            
+            # topic_error_codes puede ser una lista de tuplas [(topic, error_code), ...]
+            # o un diccionario {topic: error_code}
+            if isinstance(result.topic_error_codes, list):
+                logger.info("topic_error_codes es una lista")
+                # Convertir lista de tuplas a diccionario
+                error_codes_dict = {}
+                for item in result.topic_error_codes:
+                    if isinstance(item, tuple) and len(item) >= 2:
+                        error_codes_dict[item[0]] = item[1]
                     else:
-                        failed_topics.append({"topic": topic_name, "error": f"Error code: {error_code}"})
-                        logger.error(f"Error al eliminar el tópico '{topic_name}': Error code {error_code}")
-                except Exception as e:
-                    failed_topics.append({"topic": topic_name, "error": str(e)})
-                    logger.error(f"Error al eliminar el tópico '{topic_name}': {str(e)}")
+                        logger.warning(f"Formato inesperado en topic_error_codes: {item}")
+                
+                for topic_name in topics:
+                    try:
+                        error_code = error_codes_dict.get(topic_name, -1)
+                        if error_code == 0:
+                            deleted_topics.append(topic_name)
+                            logger.info(f"Tópico '{topic_name}' eliminado exitosamente")
+                        else:
+                            failed_topics.append({"topic": topic_name, "error": f"Error code: {error_code}"})
+                            logger.error(f"Error al eliminar el tópico '{topic_name}': Error code {error_code}")
+                    except Exception as e:
+                        failed_topics.append({"topic": topic_name, "error": str(e)})
+                        logger.error(f"Error al eliminar el tópico '{topic_name}': {str(e)}")
+            elif isinstance(result.topic_error_codes, dict):
+                logger.info("topic_error_codes es un diccionario")
+                for topic_name in topics:
+                    try:
+                        error_code = result.topic_error_codes.get(topic_name, -1)
+                        if error_code == 0:
+                            deleted_topics.append(topic_name)
+                            logger.info(f"Tópico '{topic_name}' eliminado exitosamente")
+                        else:
+                            failed_topics.append({"topic": topic_name, "error": f"Error code: {error_code}"})
+                            logger.error(f"Error al eliminar el tópico '{topic_name}': Error code {error_code}")
+                    except Exception as e:
+                        failed_topics.append({"topic": topic_name, "error": str(e)})
+                        logger.error(f"Error al eliminar el tópico '{topic_name}': {str(e)}")
+            else:
+                logger.warning(f"Formato desconocido de topic_error_codes: {type(result.topic_error_codes)}")
+                deleted_topics = topics
         elif isinstance(result, dict):
             # Versión antigua que retorna un diccionario con futures
             logger.info("Procesando respuesta como diccionario de futures")
