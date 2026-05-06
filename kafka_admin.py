@@ -55,15 +55,40 @@ def delete_topics(topics: Optional[List[str]] = None) -> dict:
         # Crear admin client
         admin_client = KafkaAdminClient(**admin_config)
         
+        # Crear consumer para obtener tópicos existentes
+        consumer = KafkaConsumer(**consumer_config)
+        existing_topics = consumer.topics()
+        # Filtrar tópicos internos de Kafka
+        existing_topics = [topic for topic in existing_topics if not topic.startswith('__')]
+        
         # Si no se especifican tópicos o la lista está vacía, obtener todos los tópicos disponibles
         if topics is None or len(topics) == 0:
-            consumer = KafkaConsumer(**consumer_config)
-            all_topics = consumer.topics()
-            # Filtrar tópicos internos de Kafka
-            topics = [topic for topic in all_topics if not topic.startswith('__')]
+            topics = existing_topics
             logger.info(f"No se especificaron tópicos. Se limpiarán todos los tópicos: {topics}")
         else:
-            logger.info(f"Tópicos a limpiar: {topics}")
+            logger.info(f"Tópicos solicitados para limpiar: {topics}")
+            
+            # Validar qué tópicos existen y cuáles no
+            non_existing_topics = [topic for topic in topics if topic not in existing_topics]
+            topics_to_delete = [topic for topic in topics if topic in existing_topics]
+            
+            if non_existing_topics:
+                logger.warning(f"Los siguientes tópicos no existen: {non_existing_topics}")
+            
+            if not topics_to_delete:
+                return {
+                    "status": {
+                        "code": 404,
+                        "message": "Ninguno de los tópicos especificados existe"
+                    },
+                    "data": {
+                        "topics_deleted": [],
+                        "topics_not_found": non_existing_topics
+                    }
+                }
+            
+            topics = topics_to_delete
+            logger.info(f"Tópicos existentes a limpiar: {topics}")
         
         if not topics:
             return {
@@ -92,16 +117,33 @@ def delete_topics(topics: Optional[List[str]] = None) -> dict:
                 failed_topics.append({"topic": topic, "error": str(e)})
                 logger.error(f"Error al eliminar el tópico '{topic}': {str(e)}")
         
+        # Preparar respuesta considerando tópicos no encontrados
+        response_data = {
+            "topics_deleted": deleted_topics
+        }
+        
+        # Agregar tópicos no encontrados si existen
+        if 'non_existing_topics' in locals() and non_existing_topics:
+            response_data["topics_not_found"] = non_existing_topics
+        
         if failed_topics:
+            response_data["topics_failed"] = failed_topics
             return {
                 "status": {
                     "code": 207,  # Multi-Status
                     "message": "Algunos tópicos no pudieron ser eliminados"
                 },
-                "data": {
-                    "topics_deleted": deleted_topics,
-                    "topics_failed": failed_topics
-                }
+                "data": response_data
+            }
+        
+        # Si hay tópicos no encontrados pero los demás se eliminaron correctamente
+        if 'non_existing_topics' in locals() and non_existing_topics:
+            return {
+                "status": {
+                    "code": 207,
+                    "message": "Algunos tópicos no existen, los demás fueron eliminados"
+                },
+                "data": response_data
             }
         
         return {
@@ -109,9 +151,7 @@ def delete_topics(topics: Optional[List[str]] = None) -> dict:
                 "code": 200,
                 "message": "Tópicos eliminados exitosamente"
             },
-            "data": {
-                "topics_deleted": deleted_topics
-            }
+            "data": response_data
         }
         
     except Exception as e:
