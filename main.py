@@ -60,13 +60,15 @@ def consumer():
 def consumer_v2():
     logger.info("Entrando al consumer v2")
     if request.method == "POST":
-        retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS"))
+        default_retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS", "3"))
         body = request.get_json()
         print(body)
+        # Permitir que el cliente controle max_polls para evitar bloqueos largos
+        retry = int(body.get("max_polls", default_retry))
         result = kafka_consumer.get_message_v2(body.get("header_key"),
                                            body.get("header_value"),
-                                           body["topic"],
-                                           body["group"],
+                                           body.get("topic"),
+                                           body.get("group"),
                                            retry)
 
         logger.info("Resultado obtenido del consumer de Kafka")

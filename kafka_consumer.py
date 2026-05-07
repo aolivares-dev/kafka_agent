@@ -6,7 +6,7 @@ from kafka import KafkaConsumer
 from typing import Dict, Any, Optional, List
 
 
-def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Dict[str, Any]:
+def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dict[str, Any]:
     """
     Obtiene un mensaje especifico de Kafka por su cloud_event_id.
 
@@ -120,7 +120,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=10) -> Di
                 logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)
 
 
-def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=10) -> List[Dict[str, Any]]:
+def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=3) -> List[Dict[str, Any]]:
     """
     Obtiene un mensaje especifico de Kafka por una cabecera.
 
@@ -193,8 +193,15 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
                         else:
                             headers[key] = None
 
+                    # Log para debug
+                    logger.debug(f"Headers procesados: {headers}")
+                    logger.debug(f"Buscando header_key='{header_key}' con valor='{header_value}'")
+                    
                     # Verificamos si este es el mensaje que buscamos
-                    if headers.get(f"{header_key}") == header_value:
+                    header_match = headers.get(header_key) == header_value
+                    logger.debug(f"Valor encontrado en header: '{headers.get(header_key)}', Match: {header_match}")
+                    
+                    if header_match:
                         try:
                             # Decodificamos el valor binario a string
                             value_str = message.value.decode('utf-8')
