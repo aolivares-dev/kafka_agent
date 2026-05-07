@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from typing import Dict, Any, List, Set
 
 from kafka import KafkaConsumer
@@ -139,7 +140,9 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dic
     consumer = None
 
     try:
-        logger.info(f"Buscando mensaje con cloud_event_id: {cloud_event_id} en topic: {topic}")
+        # Agregar UUID único al group_id para evitar conflictos entre peticiones concurrentes
+        unique_group_id = f"{group}-{uuid.uuid4()}"
+        logger.info(f"Buscando mensaje con cloud_event_id: {cloud_event_id} en topic: {topic} (group: {unique_group_id})")
 
         bootstrap_servers = aws_utils.get_param("/config/all/common/kafka/boostrap-servers-tls").split(",")
         
@@ -152,7 +155,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dic
             "enable_auto_commit": True,
             "auto_commit_interval_ms": 5000,
             "request_timeout_ms": 30000,
-            "group_id": group,
+            "group_id": unique_group_id,
             "fetch_max_wait_ms": 500,
             "fetch_min_bytes": 1,
             "max_partition_fetch_bytes": 1048576
@@ -341,11 +344,13 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
     consumer = None
 
     try:
-        logger.info(f"Buscando mensaje con {header_key}: {header_value} en topic: {topic}")
+        # Agregar UUID único al group_id para evitar conflictos entre peticiones concurrentes
+        unique_group_id = f"{group}-{uuid.uuid4()}"
+        logger.info(f"Buscando mensaje con {header_key}: {header_value} en topic: {topic} (group: {unique_group_id})")
         
         # Configurar entorno y consumer
         is_local = os.getenv("ENV") == "local" or os.getenv("USE_LOCAL_KAFKA") == "true"
-        kafka_config = _get_kafka_config(group, is_local, enable_auto_commit=False)
+        kafka_config = _get_kafka_config(unique_group_id, is_local, enable_auto_commit=False)
         
         # Usar assign() en lugar de subscribe() para evitar el rebalance del grupo
         # que puede tardar varios segundos. Obtenemos las particiones del tópico directamente.
