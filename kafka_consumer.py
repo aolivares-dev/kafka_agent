@@ -237,7 +237,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dic
 def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=3) -> List[Dict[str, Any]]:
     """
     Obtiene mensajes de Kafka por una cabecera específica.
-    Busca desde el presente hacia atrás en el historial.
+    Estrategia: primero busca en mensajes recientes (historial), luego espera mensajes nuevos.
 
     :param header_key: nombre de la cabecera a buscar
     :param header_value: valor de la cabecera a buscar
@@ -256,62 +256,76 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
         is_local = os.getenv("ENV") == "local" or os.getenv("USE_LOCAL_KAFKA") == "true"
         kafka_config = _get_kafka_config(group, is_local, enable_auto_commit=False)
         
+        # Usar assign() en lugar de subscribe() para evitar el rebalance del grupo
+        # que puede tardar varios segundos. Obtenemos las particiones del tópico directamente.
         consumer = KafkaConsumer(**kafka_config)
-        consumer.subscribe([topic])
         
-        # Asignar particiones y posicionar para búsqueda hacia atrás
-        # Esperar hasta que se asignen las particiones (máximo 10 segundos)
-        max_wait_time = 10
-        wait_interval = 0.5
-        elapsed = 0
-        partitions = set()
+        # Obtener particiones del tópico sin necesidad de rebalance
+        topic_partitions = consumer.partitions_for_topic(topic)
         
-        while not partitions and elapsed < max_wait_time:
-            consumer.poll(timeout_ms=100)
-            partitions = consumer.assignment()
+        if not topic_partitions:
+            # Fallback: intentar con subscribe si no se obtienen particiones directamente
+            logger.warning(f"No se obtuvieron particiones directamente para {topic}, usando subscribe()")
+            consumer.subscribe([topic])
+            max_wait_time = 10
+            wait_interval = 0.5
+            elapsed = 0
+            partitions = set()
+            while not partitions and elapsed < max_wait_time:
+                consumer.poll(timeout_ms=100)
+                partitions = consumer.assignment()
+                if not partitions:
+                    time.sleep(wait_interval)
+                    elapsed += wait_interval
             if not partitions:
-                time.sleep(wait_interval)
-                elapsed += wait_interval
-                logger.debug(f"Esperando asignación de particiones... ({elapsed}s)")
+                logger.error(f"No se pudieron asignar particiones después de {max_wait_time} segundos")
+                return None
+        else:
+            # Asignar particiones directamente (sin rebalance, mucho más rápido)
+            partitions = {TopicPartition(topic, p) for p in topic_partitions}
+            consumer.assign(list(partitions))
+            logger.info(f"Particiones asignadas directamente (sin rebalance): {[p.partition for p in partitions]}")
         
-        if not partitions:
-            logger.error(f"No se pudieron asignar particiones después de {max_wait_time} segundos")
-            return None
+        logger.info(f"Particiones listas: {[p.partition for p in partitions]}")
         
-        logger.info(f"Particiones asignadas: {[p.partition for p in partitions]}")
-        
-        messages_to_look_back = kafka_config["max_poll_records"] * max_polls
+        # Fase 1: Buscar en mensajes recientes (historial)
+        # Retrocedemos N mensajes desde el final para buscar si el mensaje ya existe
+        messages_to_look_back = kafka_config["max_poll_records"]
         _seek_to_recent_messages(consumer, partitions, messages_to_look_back, logger)
         
-        # Buscar mensajes
+        # Buscar mensajes - los polls ahora leen tanto historial como mensajes nuevos
+        # porque después de consumir el historial, el consumer sigue leyendo mensajes
+        # que lleguen al tópico (no se detiene en el end_offset capturado)
         response = []
         for poll_count in range(1, max_polls + 1):
             logger.info(f"Poll intento {poll_count}/{max_polls}")
             
-            records = consumer.poll(timeout_ms=5000)
+            # Usar timeout más largo para dar tiempo a que lleguen mensajes nuevos
+            records = consumer.poll(timeout_ms=7000)
             if not records:
                 logger.info("No se encontraron registros en este poll")
                 continue
             
             # Procesar mensajes
+            messages_processed = 0
             for topic_partition, consumer_records in records.items():
                 for message in consumer_records:
+                    messages_processed += 1
                     headers = _decode_headers(message.headers)
-                    
-                    logger.debug(f"Headers procesados: {headers}")
-                    logger.debug(f"Buscando {header_key}='{header_value}'")
                     
                     if headers.get(header_key) == header_value:
                         try:
                             body_obj = _parse_message_value(message.value)
                             consumer_response = _build_response(message.key, body_obj, headers)
                             
-                            logger.info(f"Mensaje encontrado con {header_key}: {header_value}")
+                            logger.info(f"Mensaje encontrado con {header_key}: {header_value} en offset {message.offset}")
                             response.append(consumer_response)
                             
                         except (UnicodeDecodeError, json.JSONDecodeError) as err:
                             logger.error(f"Error al procesar mensaje: {str(err)}")
                             return None
+            
+            logger.info(f"Poll {poll_count}: procesados {messages_processed} mensajes, encontrados {len(response)}")
             
             if response:
                 return response
