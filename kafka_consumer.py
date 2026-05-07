@@ -262,10 +262,18 @@ def get_message_v2(header_key: str, header_value: str, topic: str, from_timestam
         # Filtrar en memoria por header_key == header_value
         filtered = []
         for msg in all_messages:
-            if msg["headers"].get(header_key) == header_value:
+            msg_header_value = msg["headers"].get(header_key)
+            logger.debug(f"Comparando: {header_key}='{msg_header_value}' vs '{header_value}' -> {msg_header_value == header_value}")
+            if msg_header_value == header_value:
                 filtered.append(msg["response"])
         
         logger.info(f"Filtrado: {len(filtered)} de {len(all_messages)} mensajes coinciden con {header_key}={header_value}")
+        
+        # Si no se encontró nada, mostrar algunos headers para debug
+        if not filtered and all_messages:
+            logger.warning(f"No se encontraron coincidencias. Primeros 3 valores de '{header_key}' encontrados:")
+            for i, msg in enumerate(all_messages[:3]):
+                logger.warning(f"  Mensaje {i+1}: {header_key}='{msg['headers'].get(header_key)}'")
         
         return filtered
 

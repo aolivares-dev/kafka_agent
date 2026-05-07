@@ -75,10 +75,11 @@ def consumer_v2():
         "topic": "nombre-del-topico",
         "header_key": "ce_id",
         "header_value": "uuid-del-evento",
-        "group": "grupo-consumidor",          // opcional, no se usa en assign directo
         "lookback_ms": 60000,                 // tiempo hacia atrás en ms (default 60s)
         "max_polls": 3                        // opcional, default env
     }
+    
+    Nota: NO usa consumer groups, hace assign() directo a las particiones.
     """
     start_time = time.time()
     logger.info("Entrando al consumer v2")
