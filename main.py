@@ -102,6 +102,54 @@ def consumer_v2():
         "data": None
     }
 
+
+@app.route("/v2/consumer/fetch", methods=['POST'])
+def consumer_v2_fetch():
+    """
+    Endpoint que retorna TODOS los mensajes de un tópico desde un timestamp dado.
+    El filtrado se hace del lado del cliente (Java).
+    
+    Body esperado:
+    {
+        "topic": "nombre-del-topico",
+        "from_timestamp_ms": 1715089041000,  // epoch millis desde donde buscar
+        "max_polls": 3                        // opcional, default env
+    }
+    """
+    start_time = time.time()
+    logger.info("Entrando al consumer v2/fetch (sin filtro server-side)")
+    
+    if request.method == "POST":
+        default_retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS", "3"))
+        body = request.get_json()
+        logger.info(f"Request body: {body}")
+        
+        topic = body.get("topic")
+        from_timestamp_ms = body.get("from_timestamp_ms")
+        max_polls = int(body.get("max_polls", default_retry))
+        
+        if not topic or not from_timestamp_ms:
+            return {"error": "Se requieren 'topic' y 'from_timestamp_ms'"}, 400
+        
+        result = kafka_consumer.fetch_messages_from_timestamp(
+            topic=topic,
+            from_timestamp_ms=int(from_timestamp_ms),
+            max_polls=max_polls
+        )
+
+        elapsed_time = time.time() - start_time
+        elapsed_time_ms = round(elapsed_time * 1000, 2)
+        
+        logger.info(f"Fetch completado - {len(result) if result else 0} mensajes - Tiempo: {elapsed_time_ms}ms")
+
+        return {
+            "data": result if result is not None else [],
+            "count": len(result) if result else 0,
+            "response_time_ms": elapsed_time_ms
+        }
+
+    return {"data": None}
+
 @app.route("/clean-topics", methods=['POST'])
 def clean_topics():
     """

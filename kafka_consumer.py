@@ -234,6 +234,97 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dic
                 logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)
 
 
+def fetch_messages_from_timestamp(topic: str, from_timestamp_ms: int, max_polls: int = 3) -> List[Dict[str, Any]]:
+    """
+    Obtiene TODOS los mensajes de un tópico desde un timestamp dado.
+    No filtra por headers — retorna todo para que el cliente filtre en memoria.
+
+    :param topic: tópico de Kafka
+    :param from_timestamp_ms: timestamp en milisegundos desde donde empezar a leer
+    :param max_polls: número máximo de polls (cada uno con timeout de 5s)
+    :return: Lista de todos los mensajes encontrados desde el timestamp
+    """
+    logger = _setup_logger()
+    consumer = None
+
+    try:
+        logger.info(f"Fetch ALL mensajes desde timestamp {from_timestamp_ms} en topic: {topic}")
+        
+        is_local = os.getenv("ENV") == "local" or os.getenv("USE_LOCAL_KAFKA") == "true"
+        # Usar un group_id fijo con prefijo para no contaminar otros consumers
+        kafka_config = _get_kafka_config("qa-fetch-agent", is_local, enable_auto_commit=False)
+        # No necesitamos group_id para assign manual
+        del kafka_config["group_id"]
+        
+        consumer = KafkaConsumer(**kafka_config)
+        
+        # Obtener particiones del tópico directamente (sin rebalance)
+        topic_partitions_ids = consumer.partitions_for_topic(topic)
+        
+        if not topic_partitions_ids:
+            logger.error(f"No se encontraron particiones para el tópico: {topic}")
+            return []
+        
+        partitions = [TopicPartition(topic, p) for p in topic_partitions_ids]
+        consumer.assign(partitions)
+        
+        logger.info(f"Particiones asignadas: {[p.partition for p in partitions]}")
+        
+        # Buscar offsets por timestamp para cada partición
+        timestamps_to_search = {tp: from_timestamp_ms for tp in partitions}
+        offsets_for_times = consumer.offsets_for_times(timestamps_to_search)
+        
+        # Posicionar cada partición en el offset correspondiente al timestamp
+        for tp, offset_and_timestamp in offsets_for_times.items():
+            if offset_and_timestamp is not None:
+                consumer.seek(tp, offset_and_timestamp.offset)
+                logger.info(f"Partición {tp.partition}: seek a offset {offset_and_timestamp.offset} (timestamp {offset_and_timestamp.timestamp})")
+            else:
+                # No hay mensajes desde ese timestamp en esta partición, ir al final
+                consumer.seek_to_end(tp)
+                logger.info(f"Partición {tp.partition}: sin mensajes desde timestamp {from_timestamp_ms}, seek to end")
+        
+        # Leer todos los mensajes disponibles desde ese punto
+        all_messages = []
+        for poll_count in range(1, max_polls + 1):
+            records = consumer.poll(timeout_ms=5000)
+            
+            if not records:
+                logger.info(f"Poll {poll_count}/{max_polls}: sin registros, finalizando")
+                break
+            
+            batch_count = 0
+            for topic_partition, consumer_records in records.items():
+                for message in consumer_records:
+                    batch_count += 1
+                    headers = _decode_headers(message.headers)
+                    
+                    try:
+                        body_obj = _parse_message_value(message.value)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        # Saltar mensajes que no se pueden parsear
+                        continue
+                    
+                    msg_response = _build_response(message.key, body_obj, headers)
+                    all_messages.append(msg_response)
+            
+            logger.info(f"Poll {poll_count}/{max_polls}: {batch_count} mensajes leídos, total acumulado: {len(all_messages)}")
+        
+        logger.info(f"Fetch completado: {len(all_messages)} mensajes totales desde timestamp {from_timestamp_ms}")
+        return all_messages
+
+    except Exception as e:
+        logger.error(f"Error en fetch_messages_from_timestamp: {str(e)}", exc_info=True)
+        return []
+    finally:
+        if consumer:
+            try:
+                consumer.close()
+                logger.info("Consumer cerrado correctamente")
+            except Exception as e:
+                logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)
+
+
 def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=3) -> List[Dict[str, Any]]:
     """
     Obtiene mensajes de Kafka por una cabecera específica.
