@@ -59,65 +59,29 @@ def consumer():
 
 @app.route("/v2/consumer", methods=['GET', 'POST'])
 def consumer_v2():
-    start_time = time.time()
-    logger.info("Entrando al consumer v2")
-    
-    if request.method == "POST":
-        default_retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS", "3"))
-        body = request.get_json()
-        print(body)
-        # Permitir que el cliente controle max_polls para evitar bloqueos largos
-        retry = int(body.get("max_polls", default_retry))
-        result = kafka_consumer.get_message_v2(body.get("header_key"),
-                                           body.get("header_value"),
-                                           body.get("topic"),
-                                           body.get("group"),
-                                           retry)
-
-        # Calcular tiempo de respuesta
-        elapsed_time = time.time() - start_time
-        elapsed_time_ms = round(elapsed_time * 1000, 2)
-        
-        logger.info(f"Resultado obtenido del consumer de Kafka - Tiempo de respuesta: {elapsed_time_ms}ms ({elapsed_time:.2f}s)")
-
-        # Si el resultado es None, devolvemos una respuesta vacía con tiempo
-        if result is None:
-            return {
-                "data": None,
-                "response_time_ms": elapsed_time_ms
-            }
-
-        # Si hay resultado, agregamos el tiempo de respuesta a la estructura
-        if isinstance(result, list):
-            return {
-                "data": result,
-                "response_time_ms": elapsed_time_ms
-            }
-        else:
-            result["response_time_ms"] = elapsed_time_ms
-            return result
-
-    # Si no es POST, devolvemos una respuesta vacía
-    return {
-        "data": None
-    }
-
-
-@app.route("/v2/consumer/fetch", methods=['POST'])
-def consumer_v2_fetch():
     """
-    Endpoint que retorna TODOS los mensajes de un tópico desde un timestamp dado.
-    El filtrado se hace del lado del cliente (Java).
+    Endpoint v2 del consumer.
+    
+    Lógica:
+    1. Recibe topic, header_key, header_value, lookback_ms (tiempo hacia atrás)
+    2. Calcula el timestamp = now - lookback_ms
+    3. Lee TODOS los mensajes del tópico desde ese timestamp (sin filtro)
+    4. Ordena los mensajes del más reciente al más antiguo
+    5. Filtra en memoria por header_key == header_value
+    6. Retorna los mensajes filtrados
     
     Body esperado:
     {
         "topic": "nombre-del-topico",
-        "from_timestamp_ms": 1715089041000,  // epoch millis desde donde buscar
+        "header_key": "ce_id",
+        "header_value": "uuid-del-evento",
+        "group": "grupo-consumidor",          // opcional, no se usa en assign directo
+        "lookback_ms": 60000,                 // tiempo hacia atrás en ms (default 60s)
         "max_polls": 3                        // opcional, default env
     }
     """
     start_time = time.time()
-    logger.info("Entrando al consumer v2/fetch (sin filtro server-side)")
+    logger.info("Entrando al consumer v2")
     
     if request.method == "POST":
         default_retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS", "3"))
@@ -125,30 +89,45 @@ def consumer_v2_fetch():
         logger.info(f"Request body: {body}")
         
         topic = body.get("topic")
-        from_timestamp_ms = body.get("from_timestamp_ms")
+        header_key = body.get("header_key")
+        header_value = body.get("header_value")
+        lookback_ms = int(body.get("lookback_ms", 60000))
         max_polls = int(body.get("max_polls", default_retry))
         
-        if not topic or not from_timestamp_ms:
-            return {"error": "Se requieren 'topic' y 'from_timestamp_ms'"}, 400
+        # Calcular timestamp desde donde leer: ahora - lookback_ms
+        from_timestamp_ms = int(time.time() * 1000) - lookback_ms
         
-        result = kafka_consumer.fetch_messages_from_timestamp(
+        logger.info(f"Buscando en topic={topic}, header={header_key}={header_value}, lookback={lookback_ms}ms, from_ts={from_timestamp_ms}")
+        
+        result = kafka_consumer.get_message_v2(
+            header_key=header_key,
+            header_value=header_value,
             topic=topic,
-            from_timestamp_ms=int(from_timestamp_ms),
+            from_timestamp_ms=from_timestamp_ms,
             max_polls=max_polls
         )
 
+        # Calcular tiempo de respuesta
         elapsed_time = time.time() - start_time
         elapsed_time_ms = round(elapsed_time * 1000, 2)
         
-        logger.info(f"Fetch completado - {len(result) if result else 0} mensajes - Tiempo: {elapsed_time_ms}ms")
+        logger.info(f"Consumer v2 completado - Tiempo: {elapsed_time_ms}ms")
+
+        if result is None:
+            return {
+                "data": [],
+                "response_time_ms": elapsed_time_ms
+            }
 
         return {
-            "data": result if result is not None else [],
-            "count": len(result) if result else 0,
+            "data": result,
             "response_time_ms": elapsed_time_ms
         }
 
-    return {"data": None}
+    # Si no es POST, devolvemos una respuesta vacía
+    return {
+        "data": None
+    }
 
 @app.route("/clean-topics", methods=['POST'])
 def clean_topics():
@@ -197,4 +176,3 @@ def clean_topics():
     
     status_code = result["status"]["code"]
     return result, status_code
-
