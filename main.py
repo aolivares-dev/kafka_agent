@@ -1,4 +1,5 @@
 import os
+import time
 from flask import Flask, logging
 from flask import request
 import kafka_producer
@@ -58,7 +59,9 @@ def consumer():
 
 @app.route("/v2/consumer", methods=['GET', 'POST'])
 def consumer_v2():
+    start_time = time.time()
     logger.info("Entrando al consumer v2")
+    
     if request.method == "POST":
         default_retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS", "3"))
         body = request.get_json()
@@ -71,16 +74,28 @@ def consumer_v2():
                                            body.get("group"),
                                            retry)
 
-        logger.info("Resultado obtenido del consumer de Kafka")
+        # Calcular tiempo de respuesta
+        elapsed_time = time.time() - start_time
+        elapsed_time_ms = round(elapsed_time * 1000, 2)
+        
+        logger.info(f"Resultado obtenido del consumer de Kafka - Tiempo de respuesta: {elapsed_time_ms}ms ({elapsed_time:.2f}s)")
 
-        # Si el resultado es None, devolvemos una respuesta vacía
+        # Si el resultado es None, devolvemos una respuesta vacía con tiempo
         if result is None:
             return {
-                "data": None
+                "data": None,
+                "response_time_ms": elapsed_time_ms
             }
 
-        # Si hay resultado, devolvemos directamente la estructura ya formateada
-        return result
+        # Si hay resultado, agregamos el tiempo de respuesta a la estructura
+        if isinstance(result, list):
+            return {
+                "data": result,
+                "response_time_ms": elapsed_time_ms
+            }
+        else:
+            result["response_time_ms"] = elapsed_time_ms
+            return result
 
     # Si no es POST, devolvemos una respuesta vacía
     return {

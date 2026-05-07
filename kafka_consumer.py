@@ -1,9 +1,11 @@
-import aws_utils
-import logging
 import json
+import logging
 import os
+from typing import Dict, Any, List
+
 from kafka import KafkaConsumer
-from typing import Dict, Any, Optional, List
+
+import aws_utils
 
 
 def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dict[str, Any]:
@@ -152,11 +154,12 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
             "auto_offset_reset": 'earliest',
             "enable_auto_commit": True,
             "auto_commit_interval_ms": 5000,
-            "request_timeout_ms": 30000,
+            "request_timeout_ms": 5000,
             "group_id": group,
-            "fetch_max_wait_ms": 500,
+            "fetch_max_wait_ms": 1000,
             "fetch_min_bytes": 1,
-            "max_partition_fetch_bytes": 1048576
+            "max_partition_fetch_bytes": 1048576,
+            "max_poll_records": 500
         }
         
         if not is_local:
@@ -174,7 +177,7 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
             poll_count += 1
             logger.info(f"Poll intento {poll_count}/{max_polls}")
 
-            records = consumer.poll(timeout_ms=10000)
+            records = consumer.poll(timeout_ms=5000)  # 5 segundos para dar tiempo al servidor a procesar
             if not records:
                 logger.info("No se encontraron registros en este poll")
                 continue
