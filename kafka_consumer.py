@@ -234,7 +234,7 @@ def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dic
                 logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)
 
 
-def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=3) -> List[Dict[str, Any]]:
+def get_message_v2(header_key: str, header_value: str, topic: str, group: str, max_polls=3, initial_wait_seconds=0) -> List[Dict[str, Any]]:
     """
     Obtiene mensajes de Kafka por una cabecera específica.
     Estrategia: primero busca en mensajes recientes (historial), luego espera mensajes nuevos.
@@ -244,6 +244,7 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
     :param topic: topico de Kafka
     :param group: grupo consumidor
     :param max_polls: numero maximo de intentos de poll
+    :param initial_wait_seconds: tiempo de espera inicial antes del primer poll (para dar tiempo a que el mensaje se propague)
     :return: Lista de mensajes encontrados o None si hay error
     """
     logger = _setup_logger()
@@ -287,6 +288,11 @@ def get_message_v2(header_key: str, header_value: str, topic: str, group: str, m
             logger.info(f"Particiones asignadas directamente (sin rebalance): {[p.partition for p in partitions]}")
         
         logger.info(f"Particiones listas: {[p.partition for p in partitions]}")
+        
+        # Espera inicial antes de consumir, para dar tiempo a que el mensaje se propague en Kafka
+        if initial_wait_seconds > 0:
+            logger.info(f"Esperando {initial_wait_seconds}s antes del primer poll (initial_wait_seconds)")
+            time.sleep(initial_wait_seconds)
         
         # Fase 1: Buscar en mensajes recientes (historial)
         # Retrocedemos N mensajes desde el final para buscar si el mensaje ya existe

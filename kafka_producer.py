@@ -42,7 +42,7 @@ def send_message(cloud_id: str, topic: str, message: str, _headers: Dict, type: 
                 request_timeout_ms=30000,
                 retries=5,
                 metadata_max_age_ms=999999999,
-                linger_ms=5000
+                linger_ms=0
             )
         else:
             # Configuración para Kafka en AWS con SSL
@@ -54,7 +54,7 @@ def send_message(cloud_id: str, topic: str, message: str, _headers: Dict, type: 
                 request_timeout_ms=30000,
                 retries=5,
                 metadata_max_age_ms=999999999,
-                linger_ms=5000
+                linger_ms=0
             )
 
         ce_event = event.CloudEvent.create(attributes=_headers, data=json.dumps(message))

@@ -64,15 +64,18 @@ def consumer_v2():
     
     if request.method == "POST":
         default_retry = int(os.getenv("CONSUMER_RETRY_ATTEMPS", "3"))
+        default_initial_wait = int(os.getenv("INITIAL_WAIT_SECONDS", "0"))
         body = request.get_json()
         print(body)
         # Permitir que el cliente controle max_polls para evitar bloqueos largos
         retry = int(body.get("max_polls", default_retry))
+        initial_wait = int(body.get("initial_wait_seconds", default_initial_wait))
         result = kafka_consumer.get_message_v2(body.get("header_key"),
                                            body.get("header_value"),
                                            body.get("topic"),
                                            body.get("group"),
-                                           retry)
+                                           retry,
+                                           initial_wait)
 
         # Calcular tiempo de respuesta
         elapsed_time = time.time() - start_time
