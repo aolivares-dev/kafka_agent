@@ -102,6 +102,24 @@ def consumer_v2():
         "data": None
     }
 
+@app.route("/listener", methods=['POST'])
+def listener():
+    body = request.get_json()
+    topic = body.get("topic")
+    group = body.get("group", "listener-group")
+    max_polls = int(body.get("max_polls", 3))
+
+    if not topic:
+        return {"status": {"code": 400, "message": "El campo 'topic' es requerido"}, "data": None}, 400
+
+    result = kafka_consumer.listen_topic(topic, group, max_polls)
+
+    if result is None:
+        return {"data": None}
+
+    return result
+
+
 @app.route("/clean-topics", methods=['POST'])
 def clean_topics():
     """

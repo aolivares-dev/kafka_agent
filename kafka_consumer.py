@@ -120,6 +120,80 @@ def _seek_to_recent_messages(consumer: KafkaConsumer, partitions: Set[TopicParti
         consumer.seek(partition, new_offset)
 
 
+def listen_topic(topic: str, group: str, max_polls: int = 3) -> Dict[str, Any]:
+    """
+    Escucha un tópico de Kafka y retorna el primer mensaje encontrado.
+
+    :param topic: Tópico de Kafka a escuchar
+    :param group: Grupo consumidor
+    :param max_polls: Número máximo de intentos de poll
+    :return: Diccionario con {data: {key, value, headers}} o None si no se encuentra
+    """
+    logger = _setup_logger()
+    consumer = None
+
+    try:
+        logger.info(f"Escuchando tópico: {topic} con grupo: {group}")
+
+        is_local = os.getenv("ENV") == "local" or os.getenv("USE_LOCAL_KAFKA") == "true"
+        kafka_config = _get_kafka_config(group, is_local, enable_auto_commit=False)
+
+        consumer = KafkaConsumer(**kafka_config)
+        consumer.subscribe([topic])
+
+        max_wait_time = 10
+        wait_interval = 0.5
+        elapsed = 0
+        partitions = set()
+
+        while not partitions and elapsed < max_wait_time:
+            consumer.poll(timeout_ms=100)
+            partitions = consumer.assignment()
+            if not partitions:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+
+        if not partitions:
+            logger.error(f"No se pudieron asignar particiones después de {max_wait_time} segundos")
+            return None
+
+        messages_to_look_back = kafka_config["max_poll_records"] * max_polls
+        _seek_to_recent_messages(consumer, partitions, messages_to_look_back, logger)
+
+        for poll_count in range(1, max_polls + 1):
+            logger.info(f"Poll intento {poll_count}/{max_polls}")
+            records = consumer.poll(timeout_ms=5000)
+
+            if not records:
+                continue
+
+            for topic_partition, consumer_records in records.items():
+                for message in consumer_records:
+                    try:
+                        headers = _decode_headers(message.headers)
+                        body_obj = _parse_message_value(message.value)
+                        response = _build_response(message.key, body_obj, headers)
+                        logger.info(f"Mensaje encontrado en tópico: {topic}")
+                        return response
+                    except (UnicodeDecodeError, json.JSONDecodeError) as err:
+                        logger.error(f"Error al procesar mensaje: {str(err)}")
+                        return None
+
+        logger.warning(f"No se encontraron mensajes en el tópico: {topic} después de {max_polls} intentos")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error al escuchar tópico {topic}: {str(e)}", exc_info=True)
+        return None
+    finally:
+        if consumer:
+            try:
+                consumer.close(autocommit=True)
+                logger.info("Consumer cerrado correctamente")
+            except Exception as e:
+                logger.error(f"Error al cerrar el consumer: {str(e)}", exc_info=True)
+
+
 def get_message(cloud_event_id: str, topic: str, group: str, max_polls=3) -> Dict[str, Any]:
     """
     Obtiene un mensaje especifico de Kafka por su cloud_event_id.

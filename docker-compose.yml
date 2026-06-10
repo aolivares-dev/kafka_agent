@@ -1,11 +1,16 @@
 services:
     kafka_agent:
+        container_name: kafka_agent_i
         build: .
         image: kafka_agent_i:latest
         restart: unless-stopped
         ports:
          - "9091:80"
-        environment:
-          - AWS_REGION=${AWS_REGION:-us-west-2}
-          - ENV=${ENV:-dev}
-          - CONSUMER_RETRY_ATTEMPS=3
+        env_file:
+          - .env
+          # environment:
+          # AWS_REGION        - Región AWS para servicios (SSM, etc.)
+          # ENV               - Entorno: local | dev | prod
+          # USE_LOCAL_KAFKA   - true = usa configuración local (sin SSL, sin AWS SSM)
+          # KAFKA_BOOTSTRAP_SERVERS - Host:puerto del broker Kafka
+          # CONSUMER_RETRY_ATTEMPS  - Número de reintentos por defecto para el consumer
